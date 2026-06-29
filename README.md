@@ -1,8 +1,8 @@
 # PHP Release Builder
 
-This is an attempt to standardize and automate most of the build process for PHP releases. It is based heavily on dshafik/php-build.
+This is an attempt to standardize and automate most of the build process for PHP releases starting from PHP 8.6.0. It is an evolution of `sgolemon/php-release`, which was itself based heavily on `dshafik/php-build`.
 
-This container is currently based on `ubuntu:xenial`.
+This container is currently based on `ubuntu:resolute`.
 
 It will do the following:
 
@@ -28,33 +28,19 @@ This directory must contain a `config` file (see `config.default` for settings).
 The build process will create/overwrite the following folders and files within `/workspace`:
 
 1. `php-src/`: The checkout from php-src. This checkout is performed fresh with every invocation of php-release.
-2. `log/{config,make,test}.{debug-,}{nts,zts}`: Results of ./configure, make, and make test across debug/non-debug zts/nts
+2. `log/{config,make,test}.{debug-,}{nts,zts}.log`: Results of ./configure, make, and make test across zts/nts
 
 For example, assuming you created your workspace in your home directory, you could run the following:
 
 ```sh
-docker run --rm -v/home/$USER/workspace:/workspace sgolemon/php-release
+docker run --rm -v/home/$USER/workspace:/workspace -v/home/$USER/.gnupg:/tmp/gnupg -ti mbeccati/php-release
 ```
 
 or
 
 ```sh
-podman run --rm -v/home/$USER/workspace:/workspace sgolemon/php-release
+podman run --rm -v/home/$USER/workspace:/workspace -v/home/$USER/.gnupg:/tmp/gnupg -ti mbeccati/php-release
 ```
 
 This will pull the image from hub.docker.com and run it,
 mounting your local `~/workspace` directory as `/workspace` within the container.
-
-### Debian Jessie
-
-For the earlier, debian:jessie version of this image, use:
-
-```sh
-docker run --rm -v/home/$USER/workspace:/workspace sgolemon/php-release:jessie
-```
-
-or
-
-```sh
-podman run --rm -v/home/$USER/workspace:/workspace sgolemon/php-release:jessie
-```

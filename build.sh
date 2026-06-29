@@ -12,6 +12,7 @@ COMMITTER_EMAIL=${COMMITTER_EMAIL:?"COMITTER_EMAIL is not set"}
 RELEASE_DATE=${RELEASE_DATE:-`date +%Y-%m-%d -d 'thursday'`}
 RELEASE_BRANCH=${RELEASE_BRANCH:?"RELEASE_BRANCH is not set"}
 RELEASE_VERSION=${RELEASE_VERSION:?"RELEASE_VERSION is not set"}
+GPG_KEY=${GPG_KEY:?"GPG_KEY is not set"}
 CONFIGURE_AC=${CONFIGURE_AC:-"configure.ac"}
 MAKE_JOBS=${MAKE_JOBS:-`nproc`}
 TEST_JOBS=${TEST_JOBS:-`nproc`}
@@ -32,11 +33,29 @@ if [ "$VERSION_PATCH" != "$(echo $1 | cut -d '.' -f 3)" ]; then
 fi
 VERSION_ID=$(($((VERSION_MAJOR*10000))+$((VERSION_MINOR*100))+$((VERSION_PATCH+0))))
 
+# Prepare GPG stuff
+if [ ! -d /tmp/gnupg ]; then
+  echo Please bind mount your .gnupg folder to  /tmp/gnupg
+  exit 1
+fi
+
+mkdir -p /root/.gnupg
+chmod 700 /root/.gnupg
+cp -Rp /tmp/gnupg/* /root/.gnupg/
+
+# Force TTY pinentry
+echo > /root/.gnupg/gpg-agent.conf <<EOF
+default-cache-ttl 1800
+max-cache-ttl 7200
+pinentry-program /usr/bin/pinentry-tty
+EOF
+
 # Reveal our plan
 echo "php-release builder"
 echo "-------------------"
 echo "COMMITTER_NAME=${COMMITTER_NAME}"
 echo "COMMITTER_EMAIL=${COMMITTER_EMAIL}"
+echo "GPG_KEY=${GPG_KEY}"
 echo "RELEASE_DATE=${RELEASE_DATE}"
 echo -n "RELEASE_BRANCH="
 if [  -z "$CUT_RELEASE_BRANCH" ]; then
@@ -45,43 +64,19 @@ else
   echo "$CUT_RELEASE_BRANCH (new branch cut from $RELEASE_BRANCH)"
 fi
 echo "RELEASE_VERSION=${RELEASE_VERSION}"
-if [ ! -z "$RE2C_VERSION" ]; then
-  echo "RE2C_VERSION=${RE2C_VERSION} (instead of distro version: $(re2c --version))"
-fi
 echo "-------------------"
-
-# Update re2c
-if [ ! -z "$RE2C_VERSION" ]; then
-  echo "Removing distro re2c"
-  if [ -d "/usr/src/re2c-${RE2C_VERSION}/re2c" ]; then
-    echo "Using pre-built re2c from /usr/src/re2c-${RE2C_VERSION}"
-    cd "/usr/src/re2c-${RE2C_VERSION}/re2c"
-  else
-    echo "Building re2c-${RE2C_VERSION} from source"
-    cd /usr/src
-    git clone -b "${RE2C_VERSION}" --depth=1 https://github.com/skvadrik/re2c.git re2c
-    cd re2c/re2c
-    ./autogen.sh && ./configure --prefix=/usr
-    make -j ${MAKE_JOBS}
-  fi
-  dpkg -r re2c
-  make install
-  re2c --version
-fi
 
 # Clean up workspace
 cd /workspace
 rm -rf php-src
-rm -f  log/{config,make,tests}.{debug-,}[nz]ts
-mkdir -p /workspace/bin
-cp /manifest.sh /sign.sh /workspace/bin/
+rm -f  log/{config,make,tests}.{debug-,}[nz]ts.log
 
 # Clone from source (using public readable),
 # Configure commiter,
 # then update branch to push destination
 echo "Cloning from ${PHP_REPO_FETCH}"
 cd /workspace
-git clone -b "$RELEASE_BRANCH" --depth="${CLONE_DEPTH:-1000}" "${PHP_REPO_FETCH}"
+git clone -b "$RELEASE_BRANCH" -o upstream --depth="${CLONE_DEPTH:-1000}" "${PHP_REPO_FETCH}"
 
 cd /workspace/php-src
 
@@ -108,7 +103,14 @@ fi
 # Get going
 git config user.name "$COMMITTER_NAME"
 git config user.email "$COMMITTER_EMAIL"
-git remote set-url origin --push "${PHP_REPO_PUSH}"
+git config user.signingkey  "$GPG_KEY"
+git config commit.gpgsign true
+git config tag.gpgSign true
+git config merge.log true
+git remote set-url upstream --push "${PHP_REPO_PUSH}"
+
+GPG_TTY=$(tty)
+export GPG_TTY
 
 # Update NEWS
 cd /workspace/php-src
@@ -166,15 +168,24 @@ fi
 sed -i -e "s/^#define ZEND_VERSION \".*\"$/#define ZEND_VERSION \"${ZEND_VERSION}\"/g" Zend/zend.h
 git add Zend/zend.h
 
+# Bump API numbers on RC1
+if [ "$VERSION_PATCH" -eq 0 -a "$VERSION_EXTRA" = 'RC1' ]; then
+  bump_api() {
+    API_DATE=$(date +%y%m%d -d "$RELEASE_DATE")
+    sed -i -E -e "s/(define ${2}\\s.*)[0-9]{6}/\\1${API_DATE}/" "$1"
+    git add "$1"
+  }
+
+  bump_api "main/php.h" "PHP_API_VERSION"
+  bump_api "Zend/zend_extensions.h" "ZEND_EXTENSION_API_NO"
+  bump_api "Zend/zend_modules.h" "ZEND_MODULE_API_NO"
+fi
+
 # Update configure.ac
 cd /workspace/php-src
 # First four lines for 7.3 and earlier
 # Last transformation for 7.4 and later
 sed -i \
-    -e "s/^PHP_MAJOR_VERSION=[0-9]\+$/PHP_MAJOR_VERSION=$VERSION_MAJOR/g" \
-    -e "s/^PHP_MINOR_VERSION=[0-9]\+$/PHP_MINOR_VERSION=$VERSION_MINOR/g" \
-    -e "s/^PHP_RELEASE_VERSION=[0-9]\+$/PHP_RELEASE_VERSION=$VERSION_PATCH/g" \
-    -e "s/^PHP_EXTRA_VERSION=\".\+\"$/PHP_EXTRA_VERSION=\"$VERSION_EXTRA\"/g" \
     -e "s/^AC_INIT(\[PHP\], *\[[^\]]*\?\],/AC_INIT([PHP],[$RELEASE_VERSION],/g" \
     -e "s/^AC_INIT(\[PHP\], *\[[^,]*\],/AC_INIT([PHP],[$RELEASE_VERSION],/g" \
     "$CONFIGURE_AC"
@@ -201,23 +212,24 @@ make_test() {
 
   # Build PHP
   mkdir -p /workspace/log
-  rm -f "/workspace/log/config.$LOGEXT" "/workspace/log/make.$LOGEXT"
   cd /workspace/php-src
   git clean -xfdq
-  # ENABLE_ZTS on 8.0 and later, ENABLE_MAINTAINER_ZTS on 7.4 and earleir
-  # Setting both is harmless.
-  ENABLE_DEBUG=${1:?"DEBUG opt not specific"} \
-  ENABLE_ZTS=${2:?"ZTS opt not specified"} \
-  ENABLE_MAINTAINER_ZTS=${2:?"ZTS opt not specified"} \
-  CONFIG_LOG_FILE=/workspace/log/config.$LOGEXT \
-  MAKE_LOG_FILE=/workspace/log/make.$LOGEXT \
-  CONFIG_ONLY=1 \
-    travis/compile.sh
 
-  if [ "${VERSION_ID}" -ge 70400 ]; then
-    # Older PHP branches ignore the `CONFIG_ONLY` setting and have already built.
-    make all -j ${MAKE_JOBS} 2>&1 | tee -a "/workspace/log/make.$LOGEXT"
+  CONFIG_LOG_FILE=/workspace/log/config.$LOGEXT.log
+  MAKE_LOG_FILE=/workspace/log/make.$LOGEXT.log
+  TEST_LOG_FILE=/workspace/log/tests.$LOGEXT.log
+
+  CONFIG_ARGS=""
+  if [ "$1" -eq 1 ]; then
+    CONFIG_ARGS="$CONFIG_ARGS --enable-debug"
   fi
+  if [ "$2" -eq 1 ]; then
+    CONFIG_ARGS="$CONFIG_ARGS --enable-zts"
+  fi
+
+  ./buildconf --force
+  ./configure --disable-all $CONFIG_ARGS --enable-opcache-jit 2>&1 | tee $CONFIG_LOG_FILE
+  make -j${MAKE_JOBS} 2>&1 | tee $MAKE_LOG_FILE
 
   BUILT_VERSION=$(./sapi/cli/php -n -v | head -n 1 | cut -d " " -f 2)
   if [ "$BUILT_VERSION" != "$RELEASE_VERSION" ]; then
@@ -225,21 +237,11 @@ make_test() {
     exit 1
   fi
 
-  # Run tests
-  TEST_JOBS_ARG=""
-  if [ "${VERSION_ID}" -ge 70400 ]; then
-    TEST_JOBS_ARG="-j${TEST_JOBS}"
-  fi
+  make test TEST_PHP_ARGS="-q -j${TEST_JOBS} --show-diff" 2>&1 | tee $TEST_LOG_FILE
 
-  mkdir -p /workspace/log
-  cd /workspace/php-src
-  TEST_FPM_RUN_AS_ROOT=1 \
-  MYSQL_TEST_SKIP_CONNECT_FAILURE=1 \
-  REPORT_EXIT_STATUS=${ABORT_ON_TEST_FAILURES:-1} \
-  sapi/cli/php run-tests.php \
-    -p "$(pwd)/sapi/cli/php" -q -s /workspace/log/tests.$LOGEXT \
-    --offline --set-timeout 120 \
-    ${TEST_JOBS_ARG}
+  if [ "$?" -ne 0 -a ${ABORT_ON_TEST_FAILURES:-"0"} -ne 0 ]; then
+    exit $?
+  fi
 }
 
 MAKE_TESTS="${MAKE_TESTS:-2}"
@@ -259,13 +261,9 @@ fi
 cd /workspace/php-src
 echo "-----------------"
 echo "Bundling tarballs"
-git tag "php-$RELEASE_VERSION" "$TAG_COMMIT"
-if [ "${VERSION_ID}" -ge 70400 ]; then
-  scripts/dev/makedist "php-$RELEASE_VERSION"
-else
-  PHPROOT=. ./makedist "$RELEASE_VERSION"
-fi
-git tag -d "php-$RELEASE_VERSION"
+git tag "php-$RELEASE_VERSION" "$TAG_COMMIT" -m "Tag for php-$RELEASE_VERSION"
+scripts/dev/makedist "php-$RELEASE_VERSION"
+scripts/dev/gen_verify_stub $RELEASE_VERSION $GPG_KEY > php-$RELEASE_VERSION.manifest
 
 # Back off of release spur now that we've tagged
 git reset "${SPURBASE_COMMIT}" --hard
@@ -281,7 +279,7 @@ if [ ! -z "$RELEASE_NEXT" ]; then
 fi
 
 if [ ! -z "$COMMITTER_UID" -a ! -z "$COMMITTER_GID" ]; then
-  chown -R "${COMMITTER_UID}.${COMMITTER_GID}" /workspace/php-src
+  chown -R "${COMMITTER_UID}:${COMMITTER_GID}" /workspace/php-src
 fi
 
 # Truncate COMMIT hash for readability
@@ -290,23 +288,18 @@ TAG_COMMIT=$(echo "${TAG_COMMIT}" | cut -c 1-10)
 # Output finalization instructions
 echo "-----------------"
 echo "Tarballs prepared"
-/workspace/bin/manifest.sh "/workspace/php-src/php-$RELEASE_VERSION.tar"
-
-echo "Run the following command in workspace/php-src to sign everything:"
-echo "$ ../bin/sign.sh . '$RELEASE_VERSION' '$TAG_COMMIT' '${GPG_KEY:-YOUR_GPG_KEY}' '${GPG_USER:-$COMMITTER_EMAIL}' '${GPG_CMD:-gpg}'"
-echo ""
 
 echo "Verify what you're about to push as a tagged release:"
-echo "$ git log -p 'origin/${RELEASE_BRANCH}..php-${RELEASE_VERSION}'"
+echo "$ git log -p 'upstream/${RELEASE_BRANCH}..php-${RELEASE_VERSION}'"
 echo ""
 if [ ! -z "$RELEASE_NEXT" ]; then
   echo "And as the prepared NEWS entry for the next release:"
-  echo "$ git log -p 'origin/${RELEASE_BRANCH}..'"
+  echo "$ git log -p 'upstream/${RELEASE_BRANCH}..'"
   echo ""
 fi
 
 echo "If all is well, push it to ${PHP_REPO_PUSH}!"
-echo "$ git push origin 'php-$RELEASE_VERSION' '${CUT_RELEASE_BRANCH:-${RELEASE_BRANCH}}'"
+echo "$ git push upstream 'php-$RELEASE_VERSION' '${CUT_RELEASE_BRANCH:-${RELEASE_BRANCH}}'"
 echo ""
 
 echo "Make the tarballs available for testing:"
@@ -324,5 +317,4 @@ if [ -z "$VERSION_EXTRA" ]; then
 fi
 echo ""
 
-echo "Generate the announcement manifest with:"
-echo "$ ../bin/manifest.sh php-$RELEASE_VERSION.tar"
+echo "The announcement is: php-$RELEASE_VERSION.manifest"
