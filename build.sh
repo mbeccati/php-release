@@ -275,7 +275,7 @@ if [ ! -z "$RELEASE_NEXT" ]; then
       -e "3s/^/?? ??? ????, PHP ${RELEASE_NEXT}\n\n\n/" \
       NEWS
   git add NEWS
-  git commit -m "Update NEWS for ${RELEASE_NEXT}"
+  git commit -m "[ci skip] Update NEWS for ${RELEASE_NEXT}"
 fi
 
 if [ ! -z "$COMMITTER_UID" -a ! -z "$COMMITTER_GID" ]; then
