@@ -3,7 +3,7 @@ set -e
 
 if [ ! -f /workspace/config ]; then
   echo "Missing /workspace/config"
-  exit -1
+  exit 1
 fi
 . /workspace/config
 
@@ -44,10 +44,10 @@ chmod 700 /root/.gnupg
 cp -Rp /tmp/gnupg/* /root/.gnupg/
 
 # Force TTY pinentry
-echo > /root/.gnupg/gpg-agent.conf <<EOF
+cat > /root/.gnupg/gpg-agent.conf <<EOF
 default-cache-ttl 1800
 max-cache-ttl 7200
-pinentry-program /usr/bin/pinentry-tty
+pinentry-program /usr/bin/pinentry-curses
 EOF
 
 # Reveal our plan
@@ -112,22 +112,6 @@ git remote set-url upstream --push "${PHP_REPO_PUSH}"
 GPG_TTY=$(tty)
 export GPG_TTY
 
-# Update NEWS
-cd /workspace/php-src
-NEWS_FILE_SLUG="$(date -d ${RELEASE_DATE} '+%d %b %Y'), PHP ${RELEASE_VERSION}"
-sed -i \
-    -e "s/?? ??? \(????\|[0-9]\{4\}\),.*/${NEWS_FILE_SLUG}/g" \
-    NEWS
-if [ ! -z "$(git diff -- NEWS)" ]; then
-  git add NEWS
-  git commit -m "Update NEWS for PHP ${RELEASE_VERSION}"
-  git show | cat -
-elif [ -z "$(grep "${NEWS_FILE_SLUG}" NEWS)" ]; then
-  echo "NEWS file has neither target release date, nor ?? ??? placeholder" 1>&2
-  echo "Correct this and try again." 1>&2
-  exit 1
-fi
-
 # Update CREDITS
 cd /workspace/php-src
 scripts/dev/credits
@@ -135,6 +119,39 @@ if [ ! -z "$(git diff ext/standard/credits_{ext,sapi}.h)" ]; then
   git add ext/standard/credits_{ext,sapi}.h
   git commit -m "Update CREDITS for PHP ${RELEASE_VERSION}"
   git show | cat -
+fi
+
+# Bump API numbers when cutting the release branch
+if [ -n "$CUT_RELEASE_BRANCH" ]; then
+  bump_api() {
+    API_DATE=$(date +%y%m%d -d "$RELEASE_DATE")
+    sed -i -E -e "s/(define ${2}\\s.*)[0-9]{6}/\\1${API_DATE}/" "$1"
+    git add "$1"
+  }
+
+  bump_api "main/php.h" "PHP_API_VERSION"
+  bump_api "Zend/zend_extensions.h" "ZEND_EXTENSION_API_NO"
+  bump_api "Zend/zend_modules.h" "ZEND_MODULE_API_NO"
+
+  git commit -m "Prepare for PHP ${RELEASE_VERSION}"
+fi
+
+# Update NEWS
+cd /workspace/php-src
+NEWS_FILE_SLUG="$(date -d ${RELEASE_DATE} '+%d %b %Y'), PHP ${RELEASE_VERSION}"
+NEWS_AMEND=
+sed -i \
+    -e "s/?? ??? \(????\|[0-9]\{4\}\),.*/${NEWS_FILE_SLUG}/g" \
+    NEWS
+if [ ! -z "$(git diff -- NEWS)" ]; then
+  NEWS_AMEND=--amend
+  git add NEWS
+  git commit -m "Update NEWS for PHP ${RELEASE_VERSION}"
+  git show | cat -
+elif [ -z "$(grep "${NEWS_FILE_SLUG}" NEWS)" ]; then
+  echo "NEWS file has neither target release date, nor ?? ??? placeholder" 1>&2
+  echo "Correct this and try again." 1>&2
+  exit 1
 fi
 
 # Version bump will be on a spur ending at tag:php-${RELEASE_VERSION}
@@ -154,31 +171,14 @@ echo \
 #define PHP_VERSION_ID $VERSION_ID" > main/php_version.h
 git add main/php_version.h
 
-# Update Zend/zend.h
-cd /workspace/php-src
-if [ -z "$ZEND_VERSION" ]; then
-    # Either configure ZEND_VERSION in config file, or compute it relative to PHP version
-    if [ "$VERSION_MAJOR" -lt 7 ]; then
-        ZEND_VERSION="$((VERSION_MAJOR - 3))"
-    else
-        ZEND_VERSION="$(($VERSION_MAJOR - 4))"
-    fi
-    ZEND_VERSION="${ZEND_VERSION}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_EXTRA}"
-fi
-sed -i -e "s/^#define ZEND_VERSION \".*\"$/#define ZEND_VERSION \"${ZEND_VERSION}\"/g" Zend/zend.h
-git add Zend/zend.h
-
-# Bump API numbers on RC1
-if [ "$VERSION_PATCH" -eq 0 -a "$VERSION_EXTRA" = 'RC1' ]; then
-  bump_api() {
-    API_DATE=$(date +%y%m%d -d "$RELEASE_DATE")
-    sed -i -E -e "s/(define ${2}\\s.*)[0-9]{6}/\\1${API_DATE}/" "$1"
-    git add "$1"
-  }
-
-  bump_api "main/php.h" "PHP_API_VERSION"
-  bump_api "Zend/zend_extensions.h" "ZEND_EXTENSION_API_NO"
-  bump_api "Zend/zend_modules.h" "ZEND_MODULE_API_NO"
+if [[ "$RELEASE_EXTRA" != alpha* && "$RELEASE_EXTRA" != beta* ]]; then
+  cd /workspace/php-src
+  if [ -z "$ZEND_VERSION" ]; then
+      # Either configure ZEND_VERSION in config file, or compute it relative to PHP version
+      ZEND_VERSION="$(($VERSION_MAJOR - 4)).${VERSION_MINOR}.${VERSION_PATCH}${VERSION_EXTRA}"
+  fi
+  sed -i -e "s/^#define ZEND_VERSION \".*\"$/#define ZEND_VERSION \"${ZEND_VERSION}\"/g" Zend/zend.h
+  git add Zend/zend.h
 fi
 
 # Update configure.ac
@@ -193,7 +193,8 @@ git add "$CONFIGURE_AC"
 
 # commit
 cd /workspace/php-src
-git commit -m "Update versions for PHP ${RELEASE_VERSION}"
+git commit ${NEWS_AMEND} -m "Update versions for PHP ${RELEASE_VERSION}"
+
 git show | cat -
 TAG_COMMIT=$(git rev-parse HEAD)
 
@@ -268,6 +269,9 @@ scripts/dev/gen_verify_stub $RELEASE_VERSION $GPG_KEY > php-$RELEASE_VERSION.man
 # Back off of release spur now that we've tagged
 git reset "${SPURBASE_COMMIT}" --hard
 
+# @todo For post-GA releases, and the final pre-GA RC
+# Bump main/php_version.h, Zend/zend.h, configure.ac to the next "-dev"
+
 # Update NEWS (if requested)
 cd /workspace/php-src
 if [ ! -z "$RELEASE_NEXT" ]; then
@@ -275,7 +279,7 @@ if [ ! -z "$RELEASE_NEXT" ]; then
       -e "3s/^/?? ??? ????, PHP ${RELEASE_NEXT}\n\n\n/" \
       NEWS
   git add NEWS
-  git commit -m "[ci skip] Update NEWS for ${RELEASE_NEXT}"
+  git commit ${NEWS_AMEND} -m "[ci skip] Update NEWS for ${RELEASE_NEXT}"
 fi
 
 if [ ! -z "$COMMITTER_UID" -a ! -z "$COMMITTER_GID" ]; then
