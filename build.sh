@@ -171,7 +171,7 @@ echo \
 #define PHP_VERSION_ID $VERSION_ID" > main/php_version.h
 git add main/php_version.h
 
-if [[ "$RELEASE_EXTRA" != alpha* && "$RELEASE_EXTRA" != beta* ]]; then
+if [[ "$VERSION_EXTRA" != alpha* && "$VERSION_EXTRA" != beta* ]]; then
   cd /workspace/php-src
   if [ -z "$ZEND_VERSION" ]; then
       # Either configure ZEND_VERSION in config file, or compute it relative to PHP version
@@ -238,11 +238,8 @@ make_test() {
     exit 1
   fi
 
-  make test TEST_PHP_ARGS="-q -j${TEST_JOBS} --show-diff" 2>&1 | tee $TEST_LOG_FILE
-
-  if [ "$?" -ne 0 -a ${ABORT_ON_TEST_FAILURES:-"0"} -ne 0 ]; then
-    exit $?
-  fi
+  REPORT_EXIT_STATUS="${ABORT_ON_TEST_FAILURES:-1}" \
+    sapi/cli/php run-tests.php -q -j${TEST_JOBS} -s ${TEST_LOG_FILE} --show-diff -g "FAIL" --offline 2>&1
 }
 
 MAKE_TESTS="${MAKE_TESTS:-2}"
