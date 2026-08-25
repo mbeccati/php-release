@@ -57,3 +57,6 @@ RELEASE_NEXT="7.2.0alpha2"
 
 ## Number of parallel jobs to dispatch for `run-tests.php` stage.
 # TEST_JOBS=$(nproc)
+
+## Test matrix level (0 = No tests, 1 = Debug-ZTS only, 2 = All tests)
+# MAKE_TESTS=2

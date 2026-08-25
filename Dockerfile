@@ -13,5 +13,5 @@ RUN apt-get update && apt-get update --fix-missing && \
 
 VOLUME ["/workspace"]
 
-COPY ./build.sh /build.sh
+COPY ./*.sh /
 CMD ["/build.sh"]
