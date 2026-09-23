@@ -113,8 +113,8 @@ if [ ! -z "$(git diff ext/standard/credits_{ext,sapi}.h)" ]; then
   git show | cat -
 fi
 
-# Bump API numbers when cutting the release branch
-if [ -n "$CUT_RELEASE_BRANCH" ]; then
+# Bump API numbers if requested
+if [ -n "$BUMP_API" ]; then
   bump_api() {
     API_DATE=$(date +%y%m%d -d "$RELEASE_DATE")
     sed -i -E -e "s/(define ${2}\\s.*)[0-9]{6}/\\1${API_DATE}/" "$1"
