@@ -31,7 +31,7 @@ RELEASE_VERSION="7.2.0alpha1"
 ## If provided, the NEWS file will be auto prepared for the next release (optional; recommended)
 RELEASE_NEXT="7.2.0alpha2"
 
-## If set, API versions will be bumped (required in specific circumstances)
+## If set to 1, API versions will be bumped (required in specific circumstances)
 #BUMP_API=1
 
 ## Remove the default re2c installed by Debian Jessie (0.13.5)

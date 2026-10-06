@@ -120,7 +120,7 @@ if [ ! -z "$(git diff ext/standard/credits_{ext,sapi}.h)" ]; then
 fi
 
 # Bump API numbers if requested
-if [ -n "$BUMP_API" ]; then
+if [[ "$BUMP_API" == "1" ]]; then
   bump_api() {
     API_DATE=$(date +%y%m%d -d "$RELEASE_DATE")
     sed -i -E -e "s/(define ${2}\\s.*)[0-9]{6}/\\1${API_DATE}/" "$1"
