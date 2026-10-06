@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 if [ ! -f /workspace/config ]; then
   echo "Missing /workspace/config"

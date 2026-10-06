@@ -1,0 +1,19 @@
+{
+    "name": "mbeccati/php-release",
+    "description": "PHP Release Builder",
+    "type": "project",
+    "require": {
+        "phpunit/phpunit": "^13.4"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PhpRelease\\Tests\\": "tests/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Matteo Beccati",
+            "email": "mbeccati@php.net"
+        }
+    ]
+}

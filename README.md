@@ -44,3 +44,34 @@ podman run --rm -v/home/$USER/workspace:/workspace -v/home/$USER/.gnupg:/tmp/gnu
 
 This will pull the image from hub.docker.com and run it,
 mounting your local `~/workspace` directory as `/workspace` within the container.
+
+## Testing the build scripts
+
+Install the development dependencies with Composer, then run PHPUnit:
+
+```sh
+composer install
+vendor/bin/phpunit
+```
+
+The tests require PHP compatible with the PHPUnit version in `composer.json`,
+Git, Bash, and GNU command-line tools (including `date`, `sed`, and `nproc`).
+Run them on Linux. To run just one group:
+
+```sh
+vendor/bin/phpunit tests/ParseVersionTest.php
+vendor/bin/phpunit tests/UpdateVersionsTest.php
+vendor/bin/phpunit tests/BuildTest.php
+```
+
+The suite checks version parsing, generated version files and Git staging,
+release commits and tags, NEWS and API updates, the build matrix, packaging,
+and failure handling. Each test uses its own temporary directory and local
+Git repositories, which are removed afterward. Temporary copies of the shell
+scripts have their container paths relocated into that directory.
+
+Build commands, PHP test execution, archive generation, and signing are stubbed;
+the suite does not compile PHP or verify real archives or signatures. The test
+Git wrapper disables signing, permits clones only from the local fixture, and
+rejects pushes. No Docker container, network access, or real signing keys are
+needed, and the suite never commits to the project repository.

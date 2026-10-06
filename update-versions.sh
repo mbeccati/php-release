@@ -6,6 +6,7 @@ VERSION_MAJOR=${VERSION_MAJOR:?"VERSION_MAJOR is not set"}
 VERSION_MINOR=${VERSION_MINOR:?"VERSION_MINOR is not set"}
 VERSION_PATCH=${VERSION_PATCH:?"VERSION_PATCH is not set"}
 VERSION_EXTRA=${VERSION_EXTRA:-""}
+PHP_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_EXTRA}"
 VERSION_ID=$(($((VERSION_MAJOR*10000))+$((VERSION_MINOR*100))+$((VERSION_PATCH+0))))
 
 # Update main/php_version.h
@@ -17,7 +18,7 @@ echo \
 #define PHP_MINOR_VERSION $VERSION_MINOR
 #define PHP_RELEASE_VERSION $VERSION_PATCH
 #define PHP_EXTRA_VERSION \"$VERSION_EXTRA\"
-#define PHP_VERSION \"$RELEASE_VERSION\"
+#define PHP_VERSION \"$PHP_VERSION\"
 #define PHP_VERSION_ID $VERSION_ID" > main/php_version.h
 git add main/php_version.h
 
@@ -36,7 +37,7 @@ cd /workspace/php-src
 # First four lines for 7.3 and earlier
 # Last transformation for 7.4 and later
 sed -i \
-    -e "s/^AC_INIT(\[PHP\], *\[[^\]]*\?\],/AC_INIT([PHP],[$RELEASE_VERSION],/g" \
-    -e "s/^AC_INIT(\[PHP\], *\[[^,]*\],/AC_INIT([PHP],[$RELEASE_VERSION],/g" \
+    -e "s/^AC_INIT(\[PHP\], *\[[^\]]*\?\],/AC_INIT([PHP],[$PHP_VERSION],/g" \
+    -e "s/^AC_INIT(\[PHP\], *\[[^,]*\],/AC_INIT([PHP],[$PHP_VERSION],/g" \
     "$CONFIGURE_AC"
 git add "$CONFIGURE_AC"
