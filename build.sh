@@ -68,7 +68,13 @@ rm -f  log/{config,make,tests}.{debug-,}[nz]ts.log
 # then update branch to push destination
 echo "Cloning from ${PHP_REPO_FETCH}"
 cd /workspace
-git clone -b "$RELEASE_BRANCH" -o upstream --depth="${CLONE_DEPTH:-1000}" "${PHP_REPO_FETCH}"
+
+if [[ -z "$CLONE_DEPTH" ]]; then
+  git clone -b "$RELEASE_BRANCH" -o upstream "${PHP_REPO_FETCH}"
+else
+  # Shallow clone
+  git clone -b "$RELEASE_BRANCH" -o upstream --depth="${CLONE_DEPTH:-1000}" "${PHP_REPO_FETCH}"
+fi
 
 cd /workspace/php-src
 

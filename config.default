@@ -38,8 +38,8 @@ RELEASE_NEXT="7.2.0alpha2"
 ## and build re2c from source at this tag instead
 # RE2C_VERSION="1.0.3"
 
-## Limit `git clone` checkout depth (optional; default 1000)
-# CLONE_DEPTH=1000
+## Limit `git clone` checkout depth (optional; default is full clone)
+# CLONE_DEPTH=
 
 ## Email address of the GPG key to use for signing tarballs (optional; default: $COMMITTER_EMAIL)
 ## This value is only used to help produce helpful finalization instructions
