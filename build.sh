@@ -69,14 +69,19 @@ rm -f  log/{config,make,tests}.{debug-,}[nz]ts.log
 echo "Cloning from ${PHP_REPO_FETCH}"
 cd /workspace
 
-if [[ -z "$CLONE_DEPTH" ]]; then
-  git clone -b "$RELEASE_BRANCH" -o upstream "${PHP_REPO_FETCH}"
-else
-  # Shallow clone
-  git clone -b "$RELEASE_BRANCH" -o upstream --depth="${CLONE_DEPTH:-1000}" "${PHP_REPO_FETCH}"
-fi
+git clone -b "$RELEASE_BRANCH" -o upstream --single-branch --depth="${CLONE_DEPTH:-100}" "${PHP_REPO_FETCH}"
 
 cd /workspace/php-src
+
+# Fetch optional upmerge branches at the same depth and make them available locally.
+for branch in ${ADDITIONAL_BRANCHES:-}; do
+  git check-ref-format --branch "$branch" > /dev/null
+  git remote set-branches --add upstream "$branch"
+  git fetch --depth="${CLONE_DEPTH:-100}" upstream "+refs/heads/${branch}:refs/remotes/upstream/${branch}"
+  if ! git show-ref --verify --quiet "refs/heads/${branch}"; then
+    git branch --track "$branch" "upstream/$branch"
+  fi
+done
 
 if [ ! -z "${CUT_RELEASE_BRANCH}" ]; then
   echo "Cutting ${CUT_RELEASE_BRANCH} from ${RELEASE_BRANCH}"
