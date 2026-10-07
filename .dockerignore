@@ -1,0 +1,5 @@
+# The image only needs the root shell scripts.
+**
+!/*.sh
+!/Dockerfile
+!/.dockerignore
