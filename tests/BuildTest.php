@@ -159,6 +159,8 @@ BASH, true);
         $result = $this->build();
         self::assertSame(0, $result['status'], $result['output']);
         self::assertSame("php-8.6.0\n", $this->gitOutput('tag', '--list'));
+        self::assertSame("Keep the NEWS file\n", $this->gitOutput('config', '--local', '--get', 'merge.NEWS.name'));
+        self::assertSame("touch %A\n", $this->gitOutput('config', '--local', '--get', 'merge.NEWS.driver'));
         self::assertStringContainsString('#define PHP_VERSION "8.6.0"', $this->gitOutput('show', 'php-8.6.0:main/php_version.h'));
         self::assertSame("old version\n", file_get_contents($this->source . '/main/php_version.h'));
         self::assertStringContainsString('08 Oct 2026, PHP 8.6.0', file_get_contents($this->source . '/NEWS'));

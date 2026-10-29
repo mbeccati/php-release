@@ -110,6 +110,9 @@ git config user.signingkey  "$GPG_KEY"
 git config commit.gpgsign true
 git config tag.gpgSign true
 git config merge.log true
+# Keep NEWS for manual merging, as required by the PHP Git workflow.
+git config merge.NEWS.name "Keep the NEWS file"
+git config merge.NEWS.driver 'touch %A'
 git remote set-url upstream --push "${PHP_REPO_PUSH}"
 
 GPG_TTY=$(tty)
