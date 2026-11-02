@@ -42,7 +42,8 @@ RELEASE_NEXT="7.2.0alpha2"
 ## and build re2c from source at this tag instead
 # RE2C_VERSION="1.0.3"
 
-## History depth for the release branch and optional upmerge branches (default: 100)
+## History depth for the release branch (default: 100).
+## Ignored when UPMERGE_TO_MASTER=yes; upmerging requires full history.
 # CLONE_DEPTH=100
 
 ## Automatically merge RELEASE_BRANCH through higher version branches to master.

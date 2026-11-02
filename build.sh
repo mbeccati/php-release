@@ -76,7 +76,11 @@ rm -f  log/{config,make,tests}.{debug-,}[nz]ts.log
 echo "Cloning from ${PHP_REPO_FETCH}"
 cd /workspace
 
-git clone -b "$RELEASE_BRANCH" -o upstream --single-branch --depth="${CLONE_DEPTH:-100}" "${PHP_REPO_FETCH}"
+CLONE_OPTIONS=()
+if [ "${UPMERGE_TO_MASTER:-no}" = no ]; then
+  CLONE_OPTIONS+=(--depth="${CLONE_DEPTH:-100}")
+fi
+git clone -b "$RELEASE_BRANCH" -o upstream --single-branch "${CLONE_OPTIONS[@]}" "${PHP_REPO_FETCH}"
 
 cd /workspace/php-src
 
@@ -96,11 +100,11 @@ if [ "${UPMERGE_TO_MASTER:-no}" = yes ] && [ "$RELEASE_BRANCH" != master ]; then
   UPMERGE_BRANCHES="${UPMERGE_BRANCHES} master"
 fi
 
-# Fetch the discovered upmerge branches at the configured depth.
+# Fetch full history for each discovered upmerge branch.
 for branch in $UPMERGE_BRANCHES; do
   git check-ref-format --branch "$branch" > /dev/null
   git remote set-branches --add upstream "$branch"
-  git fetch --depth="${CLONE_DEPTH:-100}" upstream "+refs/heads/${branch}:refs/remotes/upstream/${branch}"
+  git fetch upstream "+refs/heads/${branch}:refs/remotes/upstream/${branch}"
   if ! git show-ref --verify --quiet "refs/heads/${branch}"; then
     git branch --track "$branch" "upstream/$branch"
   fi
@@ -311,10 +315,6 @@ fi
 
 # Merge branch changes upwards, never the release tag's version spur.
 if [ "$UPMERGE_TO_MASTER" = yes ] && [ -n "$UPMERGE_BRANCHES" ]; then
-  # A merge needs common ancestry, which may be outside the configured clone depth.
-  if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-    git fetch --unshallow upstream
-  fi
   RETURN_BRANCH=$(git branch --show-current)
   MERGE_SOURCE=$RELEASE_BRANCH
   for branch in $UPMERGE_BRANCHES; do

@@ -61,11 +61,11 @@ final class BuildCloneTest extends TestCase
         $this->assertDepth($clone, 'PHP-8.5', 2);
     }
 
-    public function testDiscoveredUpmergeBranchesAreShallowAndCanBeCheckedOut(): void
+    public function testDiscoveredUpmergeBranchesHaveFullHistoryAndCanBeCheckedOut(): void
     {
         $clone = $this->cloneRelease(['UPMERGE_TO_MASTER' => 'yes']);
         foreach (['PHP-8.6', 'master'] as $branch) {
-            $this->assertDepth($clone, $branch, 100);
+            $this->assertFullHistory($clone, $branch);
             $this->git(['checkout', $branch], $clone);
             self::assertSame($branch, $this->git(['branch', '--show-current'], $clone));
             self::assertSame('upstream/' . $branch, $this->git(['rev-parse', '--abbrev-ref', '@{upstream}'], $clone));
@@ -74,14 +74,14 @@ final class BuildCloneTest extends TestCase
         }
     }
 
-    public function testExplicitDepthAppliesToDiscoveredBranches(): void
+    public function testUpmergeIgnoresExplicitCloneDepth(): void
     {
         $clone = $this->cloneRelease([
             'UPMERGE_TO_MASTER' => 'yes',
             'CLONE_DEPTH' => '3',
         ]);
-        $this->assertDepth($clone, 'PHP-8.5', 3);
-        $this->assertDepth($clone, 'master', 3);
+        $this->assertFullHistory($clone, 'PHP-8.5');
+        $this->assertFullHistory($clone, 'master');
     }
 
     public function testMasterNeedsNoUpmergeBranches(): void
@@ -89,6 +89,7 @@ final class BuildCloneTest extends TestCase
         $clone = $this->cloneRelease(['UPMERGE_TO_MASTER' => 'yes', 'RELEASE_BRANCH' => 'master']);
         self::assertSame('master', $this->git(['branch', '--format=%(refname:short)'], $clone));
         self::assertSame('upstream/master', $this->git(['branch', '-r', '--format=%(refname:short)'], $clone));
+        $this->assertFullHistory($clone, 'master');
     }
 
     private function cloneRelease(array $settings = []): string
@@ -97,7 +98,7 @@ final class BuildCloneTest extends TestCase
         mkdir($work);
         $script = file_get_contents(dirname(__DIR__) . '/build.sh');
         // Execute the actual clone/fetch block without running packaging or GPG setup.
-        $start = strpos($script, 'git clone -b');
+        $start = strpos($script, 'CLONE_OPTIONS=()');
         self::assertNotFalse($start);
         $end = strpos($script, "\n" . 'if [ ! -z "${CUT_RELEASE_BRANCH}" ]; then', $start);
         self::assertNotFalse($end);
@@ -116,6 +117,12 @@ final class BuildCloneTest extends TestCase
     {
         self::assertSame('PHP-8.5', $this->git(['branch', '--format=%(refname:short)'], $clone));
         self::assertSame('upstream/PHP-8.5', $this->git(['branch', '-r', '--format=%(refname:short)'], $clone));
+    }
+
+    private function assertFullHistory(string $clone, string $branch): void
+    {
+        self::assertSame('false', $this->git(['rev-parse', '--is-shallow-repository'], $clone));
+        self::assertSame('105', $this->git(['rev-list', '--count', $branch], $clone));
     }
 
     private function assertDepth(string $clone, string $branch, int $depth): void
