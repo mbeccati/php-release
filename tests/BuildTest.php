@@ -280,6 +280,46 @@ BASH, true);
         ];
     }
 
+    public static function nextVersionsWhenCuttingBranch(): array
+    {
+        return [
+            'automatic next patch' => [null],
+            'next RC on cut branch' => ['8.6.0RC6'],
+            'GA on cut branch' => ['8.6.0'],
+        ];
+    }
+
+    #[DataProvider('nextVersionsWhenCuttingBranch')]
+    public function testCuttingPatchBranchPreparesVersionBranch(?string $next): void
+    {
+        $this->prepare([
+            'CUT_RELEASE_BRANCH' => 'PHP-8.6.0',
+            'RELEASE_VERSION' => '8.6.0RC5',
+            'RELEASE_NEXT' => $next,
+        ]);
+        $result = $this->build();
+        self::assertSame(0, $result['status'], $result['output']);
+        self::assertSame("PHP-8.6.0\n", $this->gitOutput('branch', '--show-current'));
+        self::assertStringStartsWith("PHP NEWS\n========\n?? ??? ????, PHP 8.6.1\n", $this->gitOutput('show', 'PHP-8.6:NEWS'));
+        self::assertStringContainsString('08 Oct 2026, PHP 8.6.0RC5', $this->gitOutput('show', 'PHP-8.6:NEWS'));
+        self::assertStringContainsString('#define PHP_VERSION "8.6.1-dev"', $this->gitOutput('show', 'PHP-8.6:main/php_version.h'));
+        self::assertStringContainsString('[8.6.1-dev]', $this->gitOutput('show', 'PHP-8.6:configure.ac'));
+        if ($next !== null) {
+            self::assertStringStartsWith("PHP NEWS\n========\n?? ??? ????, PHP {$next}\n", $this->gitOutput('show', 'PHP-8.6.0:NEWS'));
+        }
+        self::assertStringContainsString('#define ZEND_VERSION "4.6.1-dev"', $this->gitOutput('show', 'PHP-8.6:Zend/zend.h'));
+        if ($next === '8.6.0') {
+            self::assertStringContainsString('#define PHP_VERSION "8.6.0-dev"', $this->gitOutput('show', 'PHP-8.6.0:main/php_version.h'));
+            self::assertStringContainsString('#define ZEND_VERSION "4.6.0-dev"', $this->gitOutput('show', 'PHP-8.6.0:Zend/zend.h'));
+        }
+        self::assertStringNotContainsString('PHP 8.6.1', $this->gitOutput('show', 'PHP-8.6.0:NEWS'));
+        self::assertStringStartsWith("PHP NEWS\n========\n08 Oct 2026, PHP 8.6.0RC5\n", $this->gitOutput('show', 'php-8.6.0RC5:NEWS'));
+        self::assertStringContainsString('#define PHP_VERSION "8.6.0RC5"', $this->gitOutput('show', 'php-8.6.0RC5:main/php_version.h'));
+        self::assertSame("PHP-8.6 is now 8.6.1-dev\n", $this->gitOutput('log', '-1', '--format=%s', 'PHP-8.6'));
+        self::assertStringContainsString("git push upstream 'PHP-8.6'", $result['output']);
+        self::assertStringNotContainsString('2a. Bump version', $result['output']);
+    }
+
     #[DataProvider('branchWarnings')]
     public function testWarnsForUnexpectedReleaseBranch(string $version, bool $warns): void
     {

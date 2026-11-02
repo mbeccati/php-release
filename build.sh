@@ -21,6 +21,8 @@ PHP_REPO_FETCH=${PHP_REPO_FETCH:-"https://github.com/php/php-src"}
 PHP_REPO_PUSH=${PHP_REPO_PUSH:-"git@github.com:php/php-src"}
 
 # Translate version
+RELEASE_VERSION_ORIGINAL=$RELEASE_VERSION
+CONFIGURED_ZEND_VERSION=${ZEND_VERSION:-}
 . /parse-version.sh "$RELEASE_VERSION"
 POINT_RELEASE_BRANCH="PHP-${VERSION_MAJOR}.${VERSION_MINOR}"
 RC_RELEASE_BRANCH="${POINT_RELEASE_BRANCH}.${VERSION_PATCH}"
@@ -243,9 +245,6 @@ scripts/dev/gen_verify_stub $RELEASE_VERSION $GPG_KEY > php-$RELEASE_VERSION.man
 # Back off of release spur now that we've tagged
 git reset "${SPURBASE_COMMIT}" --hard
 
-# @todo For post-GA releases, and the final pre-GA RC
-# Bump main/php_version.h, Zend/zend.h, configure.ac to the next "-dev"
-
 # Update NEWS (if requested)
 cd /workspace/php-src
 if [ ! -z "$RELEASE_NEXT" ]; then
@@ -263,13 +262,30 @@ if [ ! -z "$RELEASE_NEXT" ]; then
     git commit ${NEWS_AMEND} -m "[ci skip] Update NEWS for ${RELEASE_NEXT}"
   else
     VERSION_EXTRA="-dev"
+    ZEND_VERSION=$CONFIGURED_ZEND_VERSION
     . /update-versions.sh
 
-    git commit ${NEWS_AMEND} -m "$RELEASE_BRANCH is now ${RELEASE_NEXT}-dev"
+    git commit ${NEWS_AMEND} -m "${CUT_RELEASE_BRANCH:-$RELEASE_BRANCH} is now ${RELEASE_NEXT}-dev"
   fi
 
   # Restore initial version
   . /parse-version.sh "$CURRENT_RELEASE"
+fi
+
+# Prepare the source version branch independently of RELEASE_NEXT on the cut branch.
+if [ "$RELEASE_BRANCH" = "$POINT_RELEASE_BRANCH" ] && \
+   [ "$CUT_RELEASE_BRANCH" = "$RC_RELEASE_BRANCH" ]; then
+  NEXT_PATCH="${VERSION_MAJOR}.${VERSION_MINOR}.$((VERSION_PATCH + 1))"
+  git checkout "$RELEASE_BRANCH"
+  git checkout "$SPURBASE_COMMIT" -- NEWS
+  sed -i -e "3s/^/?? ??? ????, PHP ${NEXT_PATCH}\n\n\n/" NEWS
+  git add NEWS
+  . /parse-version.sh "${NEXT_PATCH}-dev"
+  ZEND_VERSION=$CONFIGURED_ZEND_VERSION
+  . /update-versions.sh
+  git commit -m "$RELEASE_BRANCH is now ${NEXT_PATCH}-dev"
+  git checkout "$CUT_RELEASE_BRANCH"
+  . /parse-version.sh "$RELEASE_VERSION_ORIGINAL"
 fi
 
 if [ ! -z "$COMMITTER_UID" -a ! -z "$COMMITTER_GID" ]; then
@@ -291,12 +307,18 @@ echo "$ git log -p 'upstream/${RELEASE_BRANCH}..php-${RELEASE_VERSION}'"
 echo ""
 if [ ! -z "$RELEASE_NEXT" ]; then
   echo "And as the prepared NEWS entry for the next release:"
-  echo "$ git log -p 'upstream/${RELEASE_BRANCH}..'"
+  echo "$ git log -p 'upstream/${RELEASE_BRANCH}..${CUT_RELEASE_BRANCH:-$RELEASE_BRANCH}'"
   echo ""
 fi
 
 echo "If all is well, push it to ${PHP_REPO_PUSH}!"
 echo "$ git push upstream 'php-$RELEASE_VERSION' '${CUT_RELEASE_BRANCH:-${RELEASE_BRANCH}}'"
+if [ "$RELEASE_BRANCH" = "$POINT_RELEASE_BRANCH" ] && \
+   [ "$CUT_RELEASE_BRANCH" = "$RC_RELEASE_BRANCH" ]; then
+  echo "Review the version branch bump:"
+  echo "$ git log -p 'upstream/${RELEASE_BRANCH}..${RELEASE_BRANCH}'"
+  echo "$ git push upstream '${RELEASE_BRANCH}'"
+fi
 echo ""
 
 echo "Make the tarballs available for testing:"
@@ -306,7 +328,7 @@ else
   echo "1. Copy workspace/php-src/php-$RELEASE_VERSION.tar.{gz,bz2,xz}{,.asc} to \$USER@downloads.php.net:public_html/"
 fi
 echo "2. Contact release-managers@php.net for Windows build creation"
-if [ ! -z "${CUT_RELEASE_BRANCH}" ]; then
+if [ ! -z "${CUT_RELEASE_BRANCH}" ] && [ "$RELEASE_BRANCH" != "$POINT_RELEASE_BRANCH" ]; then
   echo "2a. Bump version in ${RELEASE_BRANCH}"
 fi
 if [ -z "$VERSION_EXTRA" ]; then

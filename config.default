@@ -23,12 +23,16 @@ RELEASE_BRANCH="PHP-7.2"
 
 ## Name of new branch to cut from $RELEASE_BRANCH
 # This branch then becomes the release branch.
+# When cutting PHP-X.Y.Z from PHP-X.Y, the source branch is automatically
+# prepared for X.Y.(Z+1)-dev, including NEWS and version files.
 # CUT_RELEASE_BRANCH="PHP-7.2.0"
 
 ## Semantic identifier for this release (required)
 RELEASE_VERSION="7.2.0alpha1"
 
 ## If provided, the NEWS file will be auto prepared for the next release (optional; recommended)
+# This applies to CUT_RELEASE_BRANCH when cutting a branch; for example,
+# use RELEASE_NEXT="8.6.0" when cutting PHP-8.6.0 for 8.6.0RC5.
 RELEASE_NEXT="7.2.0alpha2"
 
 ## If set to 1, API versions will be bumped (required in specific circumstances)
