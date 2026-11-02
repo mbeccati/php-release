@@ -16,6 +16,11 @@ GPG_KEY=${GPG_KEY:?"GPG_KEY is not set"}
 CONFIGURE_AC=${CONFIGURE_AC:-"configure.ac"}
 MAKE_JOBS=${MAKE_JOBS:-`nproc`}
 TEST_JOBS=${TEST_JOBS:-`nproc`}
+UPMERGE_TO_MASTER=${UPMERGE_TO_MASTER:-no}
+case "$UPMERGE_TO_MASTER" in
+  yes|no) ;;
+  *) echo "UPMERGE_TO_MASTER must be yes or no" >&2; exit 1 ;;
+esac
 
 PHP_REPO_FETCH=${PHP_REPO_FETCH:-"https://github.com/php/php-src"}
 PHP_REPO_PUSH=${PHP_REPO_PUSH:-"git@github.com:php/php-src"}
@@ -75,8 +80,24 @@ git clone -b "$RELEASE_BRANCH" -o upstream --single-branch --depth="${CLONE_DEPT
 
 cd /workspace/php-src
 
-# Fetch optional upmerge branches at the same depth and make them available locally.
-for branch in ${ADDITIONAL_BRANCHES:-}; do
+# Discover version branches rather than assuming which version master contains.
+UPMERGE_BRANCHES=
+if [ "${UPMERGE_TO_MASTER:-no}" = yes ] && [ "$RELEASE_BRANCH" != master ]; then
+  if [[ ! "$RELEASE_BRANCH" =~ ^PHP-([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]]; then
+    echo "Cannot determine upmerge sequence for $RELEASE_BRANCH" >&2
+    exit 1
+  fi
+  UPMERGE_MAJOR=${BASH_REMATCH[1]}
+  UPMERGE_MINOR=${BASH_REMATCH[2]}
+  UPMERGE_BRANCHES=$(git ls-remote --heads upstream | \
+    sed -n 's@.*refs/heads/\(PHP-[0-9]\+\.[0-9]\+\)$@\1@p' | \
+    sort -V | awk -F '[-.]' -v major="$UPMERGE_MAJOR" -v minor="$UPMERGE_MINOR" -v source="$RELEASE_BRANCH" \
+      '$2 > major || ($2 == major && ($3 > minor || ($3 == minor && $0 != source)))')
+  UPMERGE_BRANCHES="${UPMERGE_BRANCHES} master"
+fi
+
+# Fetch the discovered upmerge branches at the configured depth.
+for branch in $UPMERGE_BRANCHES; do
   git check-ref-format --branch "$branch" > /dev/null
   git remote set-branches --add upstream "$branch"
   git fetch --depth="${CLONE_DEPTH:-100}" upstream "+refs/heads/${branch}:refs/remotes/upstream/${branch}"
@@ -288,6 +309,35 @@ if [ "$RELEASE_BRANCH" = "$POINT_RELEASE_BRANCH" ] && \
   . /parse-version.sh "$RELEASE_VERSION_ORIGINAL"
 fi
 
+# Merge branch changes upwards, never the release tag's version spur.
+if [ "$UPMERGE_TO_MASTER" = yes ] && [ -n "$UPMERGE_BRANCHES" ]; then
+  # A merge needs common ancestry, which may be outside the configured clone depth.
+  if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+    git fetch --unshallow upstream
+  fi
+  RETURN_BRANCH=$(git branch --show-current)
+  MERGE_SOURCE=$RELEASE_BRANCH
+  for branch in $UPMERGE_BRANCHES; do
+    git checkout "$branch"
+    if ! git merge --no-ff --no-commit "$MERGE_SOURCE"; then
+      if ! git rev-parse --verify -q MERGE_HEAD > /dev/null; then
+        echo "Upmerge from $MERGE_SOURCE to $branch failed" >&2
+        exit 1
+      fi
+    fi
+    if git rev-parse --verify -q MERGE_HEAD > /dev/null; then
+      git restore --source=HEAD --staged --worktree -- NEWS main/php_version.h Zend/zend.h "$CONFIGURE_AC"
+      if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+        echo "Upmerge from $MERGE_SOURCE to $branch has conflicts; resolve them and continue manually" >&2
+        exit 1
+      fi
+      git commit -m "Merge branch '$MERGE_SOURCE' into $branch"
+    fi
+    MERGE_SOURCE=$branch
+  done
+  git checkout "$RETURN_BRANCH"
+fi
+
 if [ ! -z "$COMMITTER_UID" -a ! -z "$COMMITTER_GID" ]; then
   chown -R "${COMMITTER_UID}:${COMMITTER_GID}" /workspace/php-src
 fi
@@ -320,6 +370,12 @@ if [ "$RELEASE_BRANCH" = "$POINT_RELEASE_BRANCH" ] && \
   echo "$ git push upstream '${RELEASE_BRANCH}'"
 fi
 echo ""
+
+for branch in $UPMERGE_BRANCHES; do
+  echo "Review the upmerge to $branch:"
+  echo "$ git log -p 'upstream/${branch}..${branch}'"
+  echo "$ git push upstream '$branch'"
+done
 
 echo "Make the tarballs available for testing:"
 if [ -z "$VERSION_EXTRA" ]; then

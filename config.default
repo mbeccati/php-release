@@ -45,9 +45,12 @@ RELEASE_NEXT="7.2.0alpha2"
 ## History depth for the release branch and optional upmerge branches (default: 100)
 # CLONE_DEPTH=100
 
-## Space separated branches to fetch for upmerging (optional; default: none)
-## For a PHP 8.5 release, for example:
-# ADDITIONAL_BRANCHES="PHP-8.6 master"
+## Automatically merge RELEASE_BRANCH through higher version branches to master.
+## Discovers the required branches from RELEASE_BRANCH; master needs no upmerges.
+## Fetches full history for merges.
+## Preserves target NEWS and version files; stops on other conflicts for manual resolution.
+## Changes stay local; review and push commands are printed. Default: no.
+# UPMERGE_TO_MASTER=no
 
 ## Email address of the GPG key to use for signing tarballs (optional; default: $COMMITTER_EMAIL)
 ## This value is only used to help produce helpful finalization instructions

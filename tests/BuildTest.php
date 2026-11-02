@@ -57,7 +57,7 @@ BASH, true);
         // signing is disabled; release scripts still configure their signing key.
         $this->write($this->sandbox . '/bin/git', "#!/bin/bash\n"
             . 'if [ "$1" = push ]; then echo "Tests must never push" >&2; exit 99; fi' . "\n"
-            . 'if [ "$1" = clone ] && [ "${!#}" != "$TEST_SANDBOX/upstream/php-src" ]; then' . "\n"
+            . 'if [ "$1" = clone ] && [ "${!#}" != "$TEST_SANDBOX/upstream/php-src" ] && [ "${!#}" != "file://$TEST_SANDBOX/upstream/php-src" ]; then' . "\n"
             . '  echo "Tests may only clone their local fixture" >&2; exit 99' . "\nfi\n"
             . 'printf \'%s\n\' "$*" >> "$TEST_SANDBOX/git-calls"' . "\n"
             . 'exec ' . escapeshellarg($this->git) . ' -c commit.gpgsign=false -c tag.gpgSign=false "$@"' . "\n", true);
@@ -268,6 +268,142 @@ BASH, true);
         self::assertStringContainsString('--depth=5', file_get_contents($this->sandbox . '/git-calls'));
         self::assertStringContainsString("git push upstream 'php-8.6.0RC1' 'PHP-8.6.0'", $result['output']);
         self::assertStringContainsString('downloads.php.net', $result['output']);
+    }
+
+    private function prepareUpmergeBranches(bool $conflict = false): void
+    {
+        $upstream = $this->sandbox . '/upstream/php-src';
+        foreach (['PHP-8.7', 'PHP-8.8', 'master'] as $branch) {
+            $this->succeed([$this->git, 'checkout', '-b', $branch], [], $upstream);
+            $this->write($upstream . '/NEWS', "NEWS for $branch\n");
+            $this->write($upstream . '/main/php_version.h', "version for $branch\n");
+            $this->write($upstream . '/Zend/zend.h', "Zend for $branch\n");
+            $this->write($upstream . '/configure.ac', "configure for $branch\n");
+            if ($conflict) {
+                $this->write($upstream . '/ext/standard/credits_ext.h', "conflicting credits\n");
+            }
+            $this->succeed([$this->git, 'add', '.'], [], $upstream);
+            $this->succeed([$this->git, 'commit', '-m', "Prepare $branch"], [], $upstream);
+        }
+        $this->succeed([$this->git, 'checkout', 'PHP-8.6'], [], $upstream);
+    }
+
+    public function testUpmergesInOrderAndPreservesTargetVersionsAndNews(): void
+    {
+        $this->prepare([
+            'UPMERGE_TO_MASTER' => 'yes',
+            'RELEASE_NEXT' => '8.6.1',
+            'PHP_REPO_FETCH' => 'file://' . $this->sandbox . '/upstream/php-src',
+            'CLONE_DEPTH' => '1',
+        ]);
+        $this->prepareUpmergeBranches();
+        $result = $this->build(['TEST_CREDITS_CHANGE' => '1']);
+        self::assertSame(0, $result['status'], $result['output']);
+        self::assertSame("false\n", $this->gitOutput('rev-parse', '--is-shallow-repository'));
+        $previous = 'PHP-8.6';
+        foreach (['PHP-8.7', 'PHP-8.8', 'master'] as $branch) {
+            self::assertSame(trim($this->gitOutput('rev-parse', $previous)), trim($this->gitOutput('rev-parse', "$branch^2")));
+            self::assertSame("NEWS for $branch\n", $this->gitOutput('show', "$branch:NEWS"));
+            self::assertSame("version for $branch\n", $this->gitOutput('show', "$branch:main/php_version.h"));
+            self::assertSame("Zend for $branch\n", $this->gitOutput('show', "$branch:Zend/zend.h"));
+            self::assertSame("configure for $branch\n", $this->gitOutput('show', "$branch:configure.ac"));
+            self::assertSame("updated credits\n", $this->gitOutput('show', "$branch:ext/standard/credits_ext.h"));
+            self::assertStringContainsString("git push upstream '$branch'", $result['output']);
+            $previous = $branch;
+        }
+        self::assertSame("PHP-8.6\n", $this->gitOutput('branch', '--show-current'));
+        self::assertDoesNotMatchRegularExpression('/^push /m', file_get_contents($this->sandbox . '/git-calls'));
+    }
+
+    public function testUpmergesVersionBranchAfterCuttingRc5Branch(): void
+    {
+        $this->prepare([
+            'UPMERGE_TO_MASTER' => 'yes',
+            'CUT_RELEASE_BRANCH' => 'PHP-8.6.0',
+            'RELEASE_VERSION' => '8.6.0RC5',
+            'RELEASE_NEXT' => '8.6.0',
+        ]);
+        $this->prepareUpmergeBranches();
+        $result = $this->build();
+        self::assertSame(0, $result['status'], $result['output']);
+        self::assertSame("PHP-8.6.0\n", $this->gitOutput('branch', '--show-current'));
+        self::assertSame($this->gitOutput('rev-parse', 'PHP-8.6'), $this->gitOutput('rev-parse', 'PHP-8.7^2'));
+        self::assertStringContainsString('#define PHP_VERSION "8.6.1-dev"', $this->gitOutput('show', 'PHP-8.6:main/php_version.h'));
+        self::assertStringStartsWith("PHP NEWS\n========\n?? ??? ????, PHP 8.6.0\n", file_get_contents($this->source . '/NEWS'));
+    }
+
+    public function testPatchReleaseUpmergesThroughItsVersionBranch(): void
+    {
+        $this->prepare([
+            'UPMERGE_TO_MASTER' => 'yes',
+            'RELEASE_BRANCH' => 'PHP-8.6.0',
+            'RELEASE_NEXT' => '8.6.1',
+        ]);
+        $this->prepareUpmergeBranches();
+        $upstream = $this->sandbox . '/upstream/php-src';
+        $this->succeed([$this->git, 'branch', 'PHP-8.6.0'], [], $upstream);
+        $this->write($upstream . '/NEWS', "Version branch NEWS\n");
+        $this->succeed([$this->git, 'add', 'NEWS'], [], $upstream);
+        $this->succeed([$this->git, 'commit', '-m', 'Advance version branch'], [], $upstream);
+        $result = $this->build(['TEST_CREDITS_CHANGE' => '1']);
+        self::assertSame(0, $result['status'], $result['output']);
+        $previous = 'PHP-8.6.0';
+        foreach (['PHP-8.6', 'PHP-8.7', 'PHP-8.8', 'master'] as $branch) {
+            self::assertSame($this->gitOutput('rev-parse', $previous), $this->gitOutput('rev-parse', "$branch^2"));
+            self::assertSame("updated credits\n", $this->gitOutput('show', "$branch:ext/standard/credits_ext.h"));
+            $previous = $branch;
+        }
+        self::assertSame("Version branch NEWS\n", $this->gitOutput('show', 'PHP-8.6:NEWS'));
+        self::assertSame("PHP-8.6.0\n", $this->gitOutput('branch', '--show-current'));
+    }
+
+    public function testMasterReleaseWithUpmergeEnabledNeedsNoOtherBranches(): void
+    {
+        $this->prepare([
+            'UPMERGE_TO_MASTER' => 'yes',
+            'RELEASE_BRANCH' => 'master',
+            'RELEASE_VERSION' => '8.7.0alpha1',
+            'CUT_RELEASE_BRANCH' => 'php-8.7.0alpha1-local-release-branch',
+            'RELEASE_NEXT' => '8.7.0alpha2',
+        ]);
+        $upstream = $this->sandbox . '/upstream/php-src';
+        $this->succeed([$this->git, 'branch', '-m', 'master'], [], $upstream);
+        $result = $this->build();
+        self::assertSame(0, $result['status'], $result['output']);
+        self::assertSame("upstream/master\n", $this->gitOutput('branch', '-r', '--format=%(refname:short)'));
+        self::assertSame("php-8.7.0alpha1-local-release-branch\n", $this->gitOutput('branch', '--show-current'));
+        self::assertStringNotContainsString('Review the upmerge', $result['output']);
+    }
+
+    public function testUpmergeStopsOnOtherConflicts(): void
+    {
+        $this->prepare(['UPMERGE_TO_MASTER' => 'yes']);
+        $this->prepareUpmergeBranches(true);
+        $result = $this->build(['TEST_CREDITS_CHANGE' => '1']);
+        self::assertNotSame(0, $result['status']);
+        self::assertStringContainsString('resolve them and continue manually', $result['output']);
+        self::assertSame("PHP-8.7\n", $this->gitOutput('branch', '--show-current'));
+        self::assertSame("ext/standard/credits_ext.h\n", $this->gitOutput('diff', '--name-only', '--diff-filter=U'));
+        self::assertSame($this->gitOutput('rev-parse', 'upstream/master'), $this->gitOutput('rev-parse', 'master'));
+        self::assertStringNotContainsString('Tarballs prepared', $result['output']);
+    }
+
+    public function testUpmergeDefaultsToNo(): void
+    {
+        $this->prepare();
+        $this->prepareUpmergeBranches();
+        $result = $this->build();
+        self::assertSame(0, $result['status'], $result['output']);
+        self::assertSame("PHP-8.6\n", $this->gitOutput('branch', '--format=%(refname:short)'));
+    }
+
+    public function testInvalidUpmergeSettingFailsBeforeCloning(): void
+    {
+        $this->prepare(['UPMERGE_TO_MASTER' => 'maybe']);
+        $result = $this->build();
+        self::assertNotSame(0, $result['status']);
+        self::assertStringContainsString('UPMERGE_TO_MASTER must be yes or no', $result['output']);
+        self::assertDirectoryDoesNotExist($this->source);
     }
 
     public static function branchWarnings(): array

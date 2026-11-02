@@ -47,23 +47,23 @@ final class BuildCloneTest extends TestCase
         rmdir($this->directory);
     }
 
-    public function testUnsetAdditionalBranchesClonesOnlyReleaseAtDefaultDepth(): void
+    public function testUpmergeDefaultsToCloningOnlyReleaseAtDefaultDepth(): void
     {
         $clone = $this->cloneRelease();
         $this->assertOnlyReleaseBranch($clone);
         $this->assertDepth($clone, 'PHP-8.5', 100);
     }
 
-    public function testEmptyAdditionalBranchesClonesOnlyRelease(): void
+    public function testDisabledUpmergeClonesOnlyRelease(): void
     {
-        $clone = $this->cloneRelease(['ADDITIONAL_BRANCHES' => '', 'CLONE_DEPTH' => '2']);
+        $clone = $this->cloneRelease(['UPMERGE_TO_MASTER' => 'no', 'CLONE_DEPTH' => '2']);
         $this->assertOnlyReleaseBranch($clone);
         $this->assertDepth($clone, 'PHP-8.5', 2);
     }
 
-    public function testAdditionalBranchesAreShallowAndCanBeCheckedOut(): void
+    public function testDiscoveredUpmergeBranchesAreShallowAndCanBeCheckedOut(): void
     {
-        $clone = $this->cloneRelease(['ADDITIONAL_BRANCHES' => 'PHP-8.6 master']);
+        $clone = $this->cloneRelease(['UPMERGE_TO_MASTER' => 'yes']);
         foreach (['PHP-8.6', 'master'] as $branch) {
             $this->assertDepth($clone, $branch, 100);
             $this->git(['checkout', $branch], $clone);
@@ -74,21 +74,21 @@ final class BuildCloneTest extends TestCase
         }
     }
 
-    public function testExplicitDepthAppliesToAdditionalBranchesAndExistingReleaseBranch(): void
+    public function testExplicitDepthAppliesToDiscoveredBranches(): void
     {
         $clone = $this->cloneRelease([
-            'ADDITIONAL_BRANCHES' => 'master PHP-8.5',
+            'UPMERGE_TO_MASTER' => 'yes',
             'CLONE_DEPTH' => '3',
         ]);
         $this->assertDepth($clone, 'PHP-8.5', 3);
         $this->assertDepth($clone, 'master', 3);
     }
 
-    public function testMissingAdditionalBranchFailsTheBuild(): void
+    public function testMasterNeedsNoUpmergeBranches(): void
     {
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage("couldn't find remote ref refs/heads/missing");
-        $this->cloneRelease(['ADDITIONAL_BRANCHES' => 'missing']);
+        $clone = $this->cloneRelease(['UPMERGE_TO_MASTER' => 'yes', 'RELEASE_BRANCH' => 'master']);
+        self::assertSame('master', $this->git(['branch', '--format=%(refname:short)'], $clone));
+        self::assertSame('upstream/master', $this->git(['branch', '-r', '--format=%(refname:short)'], $clone));
     }
 
     private function cloneRelease(array $settings = []): string
@@ -108,7 +108,7 @@ final class BuildCloneTest extends TestCase
             'RELEASE_BRANCH' => 'PHP-8.5',
         ], $settings));
         $clone = $work . '/php-src';
-        self::assertSame('PHP-8.5', $this->git(['branch', '--show-current'], $clone));
+        self::assertSame($settings['RELEASE_BRANCH'] ?? 'PHP-8.5', $this->git(['branch', '--show-current'], $clone));
         return $clone;
     }
 
